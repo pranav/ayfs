@@ -3,5 +3,5 @@ import logging
 import server
 
 if __name__ == '__main__':
-    s = server.Server()
+    s = server.Server(etcd_host='10.0.0.4')
     s.start()
