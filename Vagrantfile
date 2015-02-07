@@ -31,7 +31,7 @@ Vagrant.configure(2) do |config|
   config.vm.define "client" do |client_config|
     client_config.vm.network "private_network", ip: "10.0.0.5"
     client_config.vm.hostname = "client"
-    #client_config.vm.provision
+    client_config.vm.provision "shell", path: "provisioners/node.sh"
   end
 
 end
