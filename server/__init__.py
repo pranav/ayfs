@@ -21,7 +21,7 @@ class Server():
         self.client_queue = Queue.Queue()
 
         self.receive_port = 4100
-        self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.recipient_host = None
 
         self.etcd_host = etcd_host
@@ -44,8 +44,9 @@ class Server():
     def client_sender(self):
         while True:
             block_ip_data = self.client_queue.get(True)
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.sendto(block_ip_data[1], (block_ip_data[0], 4101))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((block_ip_data[0], 4101))
+            sock.sendall(block_ip_data[1])
             sock.close()
 
     @staticmethod
@@ -102,8 +103,10 @@ class Server():
 
     def _start_listening(self):
         self.s_receiver.bind(('0.0.0.0', self.receive_port))
+        self.s_receiver.listen(1)
         while True:
-            data = self.s_receiver.recv(self.BUFFER_SIZE)
+            client, address = self.s_receiver.accept()
+            data = client.recv(self.BUFFER_SIZE)
             logger.debug("Received %s bytes" % len(data))
             self.received_queue.put_nowait(data)
 
@@ -143,8 +146,9 @@ class Server():
         while True:
             block = self.send_queue.get(True, timeout=None)
             logger.debug("Got block from send_queue")
-            s_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sent_bytes = s_send.sendto(block, (self.recipient_host, self.receive_port))
+            s_send = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s_send.connect((self.recipient_host, self.receive_port))
+            sent_bytes = s_send.sendall(block)
             s_send.close()
             logger.debug("Sent %s bytes to %s:%s" % (sent_bytes, self.recipient_host, self.receive_port))
 

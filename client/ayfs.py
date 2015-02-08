@@ -30,7 +30,7 @@ class AYFS(Operations):
     def __init__(self, etcd_host='node4'):
         self.FILE_PREFIX = '/files'
         self.DIR_INFO = '__ayfs_dir_info'
-        self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.etcd = etcd.Client(host=etcd_host)
         self.add_test_data()
         self.receive_queue = Queue.Queue()
@@ -51,8 +51,10 @@ class AYFS(Operations):
 
     def receiver_worker(self):
         self.s_receiver.bind(('0.0.0.0', 4101))
+        self.s_receiver.listen(100)
         while True:
-            data = self.s_receiver.recv(100000000)
+            client, addr = self.s_receiver.accept()
+            data = client.recv(100000)
             self.receive_queue.put_nowait(data)
 
 
@@ -228,8 +230,9 @@ class AYFS(Operations):
     def upload_block(self, block, f, block_id):
         node = list(self.etcd.read('/nodes/', recursive=True).children)[0]
         host = str(node.key.split('/')[2])
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(block, (host, 4100)) # Pray
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((host, 4100))
+        sock.sendall(block) # Pray
         sock.close()
         if f['blocks'] == ['0']:
             f['blocks'] = [block_id]
