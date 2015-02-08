@@ -14,7 +14,7 @@ logger.addHandler(logging.StreamHandler(sys.stderr))
 
 class Server():
     def __init__(self, etcd_host='127.0.0.1', etcd_port=4001):
-        self.BUFFER_SIZE = 16384
+        self.BUFFER_SIZE = 10000000
         self.WORKERS = 4
         self.received_queue = Queue.Queue()
         self.send_queue = Queue.Queue()

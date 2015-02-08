@@ -52,7 +52,7 @@ class AYFS(Operations):
     def receiver_worker(self):
         self.s_receiver.bind(('0.0.0.0', 4101))
         while True:
-            data = self.s_receiver.recv(16000)
+            data = self.s_receiver.recv(100000000)
             self.receive_queue.put_nowait(data)
 
 
