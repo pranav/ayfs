@@ -1,4 +1,5 @@
 import sys
+import struct
 import etcd
 import socket
 import Queue
@@ -16,6 +17,7 @@ class Server():
         self.WORKERS = 4
         self.received_queue = Queue.Queue()
         self.send_queue = Queue.Queue()
+        self.client_queue = Queue.Queue()
 
         self.receive_port = 4100
         self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -31,7 +33,19 @@ class Server():
         self.start_receiver_thread()
         self.start_processor_workers()
         self.start_recipient_thread()
+        self.start_client_sender_thread()
         self.send()
+
+    def start_client_sender_thread(self):
+        t = threading.Thread(target=self.client_sender)
+        t.daemon = True
+        t.start()
+
+    def client_sender(self):
+        while True:
+            block_ip_data = self.client_queue.get(True)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(block_ip_data[1], (block_ip_data[0], 4101))
 
     def start_recipient_thread(self):
         t = threading.Thread(target=self.find_recipient)
@@ -104,7 +118,7 @@ class Server():
         while True:
             data = self.s_receiver.recv(self.BUFFER_SIZE)
             self.received_queue.put_nowait(data)
-            logger.info("Received %s bytes" % len(data))
+            logger.debug("Received %s bytes" % len(data))
 
     def start_processor_workers(self):
         for worker_id in range(0, self.WORKERS):
@@ -116,6 +130,16 @@ class Server():
     def worker(self):
         while True:
             block = self.received_queue.get(True, timeout=None)
+            block_id, block_data = struct.unpack('I1000s', block)
+
+            for block_ip_id in self.get_list_of_wanted_blocks():
+                if int(block_id) == int(block_ip_id[1]):
+                    self.client_queue.put_nowait((block_ip_id[0], block))
+                    try:
+                        self.etcd.delete("/wanted_blocks/%d" % int(block_ip_id[1]))
+                    except KeyError:
+                        pass
+                    logger.info("Added %s to client_queue for %s" % (block_ip_id[1], block_ip_id[0]))
             self.send_queue.put_nowait(block)
             logger.debug("Put block in send_queue")
 
@@ -124,9 +148,17 @@ class Server():
             block = self.send_queue.get(True, timeout=None)
             logger.debug("Got block from send_queue")
             s_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            #TODO: figure out who to send to.
             sent_bytes = s_send.sendto(block, (self.recipient_host, self.receive_port))
-            logger.info("Sent %s bytes to %s:%s" % (sent_bytes, self.recipient_host, self.receive_port))
+            logger.debug("Sent %s bytes to %s:%s" % (sent_bytes, self.recipient_host, self.receive_port))
+
+    def get_list_of_wanted_blocks(self):
+        """
+        :return:tuple (ip, block)
+        """
+        block_ids = []
+        for node in self.etcd.read("/wanted_blocks", recursive=True).children:
+            block_ids.append((node.value, node.key.split('/')[2]))
+        return block_ids
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.deregister_etcd()
