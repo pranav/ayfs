@@ -1,3 +1,4 @@
+import time
 import sys
 import struct
 import etcd
@@ -106,6 +107,7 @@ class Server():
 
     def heartbeat(self):
         while True:
+            time.sleep(0.2)
             self.register_etcd()
 
     def start_receiver_thread(self):
@@ -128,10 +130,19 @@ class Server():
             t.start()
             logger.debug("Started worker %s" % worker_id)
 
+    def unpack(self, raw_block):
+        """
+        Returns raw block typle
+        :param raw_block:
+        :return:tuple (block_id, data_size, data)
+        """
+        block_id, block_size, data = struct.unpack("II1000s", raw_block)
+        return block_id, block_size, data[:block_size]
+
     def worker(self):
         while True:
             block = self.received_queue.get(True, timeout=None)
-            block_id, block_data = struct.unpack('I1000s', block)
+            block_id, data_size, block_data = self.unpack(block)
 
             for block_ip_id in self.get_list_of_wanted_blocks():
                 if int(block_id) == int(block_ip_id[1]):

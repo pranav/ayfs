@@ -12,12 +12,7 @@ from fuse import FUSE, Operations, FuseOSError
 import logging
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler(sys.stderr))
-logger.setLevel(logging.DEBUG)
-
-fuse_logger = logging.getLogger('fuse.log-mixin')
-fuse_logger.setLevel(logging.DEBUG)
-fuse_logger.addHandler(logging.StreamHandler(sys.stderr))
+logger.setLevel(logging.INFO)
 
 
 class AYFS(Operations):
@@ -40,6 +35,11 @@ class AYFS(Operations):
         self.add_test_data()
         self.receive_queue = Queue.Queue()
         self.start_receiver_thread()
+        self.PACK = "II1000s"
+
+    def unpack(self, raw_block):
+        block_id, block_size, data = struct.unpack(self.PACK, raw_block)
+        return block_id, block_size, data[:block_size]
 
     def start_receiver_thread(self):
         t = threading.Thread(target=self.receiver_worker)
@@ -53,7 +53,6 @@ class AYFS(Operations):
         self.s_receiver.bind(('0.0.0.0', 4101))
         while True:
             data = self.s_receiver.recv(16000)
-            block_id, useless_data = struct.unpack('I1000s', data)
             self.receive_queue.put_nowait(data)
 
 
@@ -79,7 +78,7 @@ class AYFS(Operations):
             self.etcd.write(self.FILE_PREFIX + path + self.DIR_INFO, json.dumps(file_dict))
         else:
             self.etcd.write(self.FILE_PREFIX + path, json.dumps(file_dict))
-        logger.info("Added %s" % path)
+        logger.debug("Added %s" % path)
 
     def delete_file(self, path):
         if path.endswith('/'):
@@ -158,18 +157,21 @@ class AYFS(Operations):
         while received_blocks < len(f['blocks']):
             #TODO: Put back block if not for me, block I need
             raw_block = self.receive_queue.get(True)
-            received_block_id, data = struct.unpack('I1000s', raw_block)
+            received_block_id, size, data = self.unpack(raw_block)
             blocks[received_block_id] = data
             logger.info("Received block: %s" % received_block_id)
             received_blocks += 1
         whole_file = self.assemble_file(blocks, blocks_ids)
-        return whole_file
+        if offset > 0:
+            return whole_file[offset:]
+        else:
+            return whole_file
 
     def assemble_file(self, blocks, block_ids):
-        buffer = blocks[block_ids[0]]
+        fbuffer = blocks[block_ids[0]]
         for block_id in block_ids[1:]:
-            buffer += blocks[block_id]
-        return buffer
+            fbuffer += blocks[block_id]
+        return fbuffer
 
     def get_blocks_ids(self, path):
         f = self.get_file(path)
@@ -210,17 +212,20 @@ class AYFS(Operations):
         pass
 
     def write(self, path, data, offset, fh):
+        logger.info("Offset: %s" % offset)
         f = self.get_file(path)
-        f['blocks'] = ['0']
+        if offset == 0:
+            f['blocks'] = ['0']
         for i in range(0, len(data), 1000):
             block_id = self.get_new_block_id()
-            block = struct.pack('I1000s', block_id, data[i:i+1000])
+            data_size = len(data[i:i+1000])
+            block = struct.pack(self.PACK, block_id, data_size, data[i:i+1000])
             f = self.upload_block(block, f, block_id)
             self.set_file(path, f)
-        logger.info("SIZE: %d" % len(data))
-        f['size'] = len(data)
+        f['size'] = f['size'] + len(data)
+        logger.info("Total Size: %d" % f['size'])
         self.set_file(path, f)
-        return 0
+        return len(data)
 
     def upload_block(self, block, f, block_id):
         node = list(self.etcd.read('/active_nodes/', recursive=True).children)[0]
