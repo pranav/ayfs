@@ -27,7 +27,7 @@ class AYFS(Operations):
     }
 
     """
-    def __init__(self, etcd_host='10.0.0.4'):
+    def __init__(self, etcd_host='node4'):
         self.FILE_PREFIX = '/files'
         self.DIR_INFO = '__ayfs_dir_info'
         self.s_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -162,10 +162,7 @@ class AYFS(Operations):
             logger.info("Received block: %s" % received_block_id)
             received_blocks += 1
         whole_file = self.assemble_file(blocks, blocks_ids)
-        if offset > 0:
-            return whole_file[offset:]
-        else:
-            return whole_file
+        return whole_file
 
     def assemble_file(self, blocks, block_ids):
         fbuffer = blocks[block_ids[0]]
@@ -216,6 +213,7 @@ class AYFS(Operations):
         f = self.get_file(path)
         if offset == 0:
             f['blocks'] = ['0']
+            f['size'] = 0
         for i in range(0, len(data), 1000):
             block_id = self.get_new_block_id()
             data_size = len(data[i:i+1000])
@@ -228,8 +226,8 @@ class AYFS(Operations):
         return len(data)
 
     def upload_block(self, block, f, block_id):
-        node = list(self.etcd.read('/active_nodes/', recursive=True).children)[0]
-        host = node.key.split('/')[2]
+        node = list(self.etcd.read('/nodes/', recursive=True).children)[0]
+        host = str(node.key.split('/')[2])
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(block, (host, 4100)) # Pray
         sock.close()

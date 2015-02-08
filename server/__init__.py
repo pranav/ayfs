@@ -14,7 +14,7 @@ logger.addHandler(logging.StreamHandler(sys.stderr))
 
 class Server():
     def __init__(self, etcd_host='127.0.0.1', etcd_port=4001):
-        self.BUFFER_SIZE = 10000000
+        self.BUFFER_SIZE = 1000000
         self.WORKERS = 4
         self.received_queue = Queue.Queue()
         self.send_queue = Queue.Queue()
@@ -26,14 +26,13 @@ class Server():
 
         self.etcd_host = etcd_host
         self.etcd_port = etcd_port
-        self.etcd = etcd.Client(host=self.etcd_host, port=self.etcd_port)
-        self.etcd.write("/active_nodes/%s" % socket.gethostname(), 0, ttl=1)
+        self.etcd = etcd.Client(host=self.etcd_host, port=self.etcd_port, read_timeout=1)
+        self.hostname = socket.gethostname()
 
     def start(self):
         self.start_heartbeat_thread()
         self.start_receiver_thread()
         self.start_processor_workers()
-        self.start_recipient_thread()
         self.start_client_sender_thread()
         self.send()
 
@@ -49,53 +48,39 @@ class Server():
             sock.sendto(block_ip_data[1], (block_ip_data[0], 4101))
             sock.close()
 
-    def start_recipient_thread(self):
-        t = threading.Thread(target=self.find_recipient)
-        t.daemon = True
-        t.start()
-
-    def find_recipient(self):
-        while True:
-            try:
-                if not (self.recipient_host is None):
-                    if int(self.etcd.get("/nodes/%s" % self.recipient_host).value) == 0:
-                        self.etcd.write("/active_nodes/%s" % host, 0, ttl=1)
-                        continue
-            except KeyError:
-                if not (self.recipient_host is None):
-                    logger.info("Lost connection to %s" % self.recipient_host)
-                    self.recipient_host = None
-                pass
-            try:
-                all_nodes = set(self.get_all_nodes())
-                active_nodes = set(self.get_active_nodes())
-                inactive_nodes = all_nodes - active_nodes
-                for node in inactive_nodes:
-                    host = Server.key2host(node)
-                    if host != socket.gethostname():
-                        self.etcd.write("/active_nodes/%s" % host, 0, ttl=1)
-                        self.recipient_host = host
-                        logger.info("Connected to %s" % host)
-            except IndexError:
-                pass
-
     @staticmethod
     def key2host(nodekey):
-        return nodekey.split('/')[2]
+        if len(nodekey.split('/')) > 2:
+            return nodekey.split('/')[2]
 
     def get_all_nodes(self):
-        return [node.key for node in self.etcd.read("/nodes", recursive=True).children]
+        return [node for node in self.etcd.read("/nodes", recursive=True).children if len(node.key.split('/')) > 2]
 
     def get_active_nodes(self):
         return [node.key for node in self.etcd.read("/active_nodes", recursive=True).children]
 
     def register_etcd(self):
-        """
-        Set node to 0
-        """
-        key = "/nodes/%s" % socket.gethostname()
-        val = 0
-        self.etcd.write("/nodes/%s" % socket.gethostname(), val, ttl=1)
+        all_nodes = self.get_all_nodes()
+        if len(all_nodes) == 0:
+            self.etcd.write("/nodes/%s" % self.hostname, 0, ttl=1)
+        if len(all_nodes) == 1 and Server.key2host(all_nodes[0].key) != self.hostname:
+            self.etcd.write("/nodes/%s" % self.hostname, Server.key2host(all_nodes[0].key), ttl=1)
+            self.recipient_host = Server.key2host(all_nodes[0].key)
+            logger.info("Connected to %s" % Server.key2host(all_nodes[0].key))
+        if len(all_nodes) > 1:
+            if not (self.recipient_host is None):
+                if self.recipient_host in map(lambda x: Server.key2host(x.key), all_nodes):
+                    self.etcd.write("/nodes/%s" % self.hostname, self.recipient_host, ttl=1)
+                    return
+            if Server.key2host(all_nodes[-1].key) != self.hostname and str(all_nodes[-1].value) != self.hostname:
+                self.recipient_host = Server.key2host(all_nodes[-1].key)
+                self.etcd.write("/nodes/%s" % self.hostname, Server.key2host(all_nodes[-1].key), ttl=1)
+                logger.info("Connected to %s" % self.recipient_host)
+                return
+            self.etcd.write("/nodes/%s" % self.hostname, 0, ttl=1)
+
+
+
 
     def deregister_etcd(self):
         self.etcd.delete("/nodes/%s")
@@ -107,7 +92,6 @@ class Server():
 
     def heartbeat(self):
         while True:
-            time.sleep(0.2)
             self.register_etcd()
 
     def start_receiver_thread(self):
@@ -120,8 +104,8 @@ class Server():
         self.s_receiver.bind(('0.0.0.0', self.receive_port))
         while True:
             data = self.s_receiver.recv(self.BUFFER_SIZE)
-            self.received_queue.put_nowait(data)
             logger.debug("Received %s bytes" % len(data))
+            self.received_queue.put_nowait(data)
 
     def start_processor_workers(self):
         for worker_id in range(0, self.WORKERS):
@@ -170,7 +154,8 @@ class Server():
         """
         block_ids = []
         for node in self.etcd.read("/wanted_blocks", recursive=True).children:
-            block_ids.append((node.value, node.key.split('/')[2]))
+            if len(node.key.split('/')) > 2:
+                block_ids.append((node.value, node.key.split('/')[2]))
         return block_ids
 
     def __exit__(self, exc_type, exc_val, exc_tb):
