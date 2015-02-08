@@ -93,7 +93,8 @@ class AYFS(Operations):
             "gid": 0,
             "atime": current_time,
             "mtime": current_time,
-            "size": 0
+            "size": 0,
+            "blocks": ['-1']
         }
         self.set_file(path, file_dict)
         logging.info("Created ", path)
@@ -102,6 +103,7 @@ class AYFS(Operations):
     def destroy(self, path):
         try:
             self.delete_file(path)
+            logger.info("Deleted file: %s" % path)
         except KeyError:
             pass
         return 0
@@ -151,13 +153,29 @@ class AYFS(Operations):
         pass
 
     def unlink(self, path):
-        pass
+        self.destroy(path)
+        return 0
 
     def utimens(self, path, times=None):
         pass
 
     def write(self, path, data, offset, fh):
-        pass
+        f = self.get_file(path)
+        block_id = self.get_new_block_id()
+        logger.info("Found block id: %d" % block_id)
+
+    def get_new_block_id(self):
+        """
+        Python ints are 24 bytes.
+        :return: int
+        """
+        block_id = 0
+        for node in self.etcd.read("/files/", recursive=True).children:
+            json.loads(node.value)['blocks']
+            block_id = max(int(node.value), block_id)
+
+        return block_id
+
 
 
 if __name__ == '__main__':
