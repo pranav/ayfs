@@ -104,7 +104,7 @@ class Server():
 
     def _start_listening(self):
         self.s_receiver.bind(('0.0.0.0', self.receive_port))
-        self.s_receiver.listen(1)
+        self.s_receiver.listen(1000)
         while True:
             client, address = self.s_receiver.accept()
             data = client.recv(self.BUFFER_SIZE)
