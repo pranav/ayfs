@@ -26,7 +26,7 @@ class Server():
 
         self.etcd_host = etcd_host
         self.etcd_port = etcd_port
-        self.etcd = etcd.Client(host=self.etcd_host, port=self.etcd_port, read_timeout=1)
+        self.etcd = etcd.Client(host=self.etcd_host, port=self.etcd_port, read_timeout=5)
         self.hostname = socket.gethostname()
 
     def start(self):
@@ -93,6 +93,7 @@ class Server():
 
     def heartbeat(self):
         while True:
+            time.sleep(0.2)
             self.register_etcd()
 
     def start_receiver_thread(self):
