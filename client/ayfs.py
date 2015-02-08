@@ -217,6 +217,7 @@ class AYFS(Operations):
             block = struct.pack('I1000s', block_id, data[i:i+1000])
             f = self.upload_block(block, f, block_id)
             self.set_file(path, f)
+        logger.info("SIZE: %d" % len(data))
         f['size'] = len(data)
         self.set_file(path, f)
         return 0
@@ -226,6 +227,7 @@ class AYFS(Operations):
         host = node.key.split('/')[2]
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(block, (host, 4100)) # Pray
+        sock.close()
         if f['blocks'] == ['0']:
             f['blocks'] = [block_id]
         else:

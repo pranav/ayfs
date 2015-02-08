@@ -46,6 +46,7 @@ class Server():
             block_ip_data = self.client_queue.get(True)
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.sendto(block_ip_data[1], (block_ip_data[0], 4101))
+            sock.close()
 
     def start_recipient_thread(self):
         t = threading.Thread(target=self.find_recipient)
@@ -149,6 +150,7 @@ class Server():
             logger.debug("Got block from send_queue")
             s_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sent_bytes = s_send.sendto(block, (self.recipient_host, self.receive_port))
+            s_send.close()
             logger.debug("Sent %s bytes to %s:%s" % (sent_bytes, self.recipient_host, self.receive_port))
 
     def get_list_of_wanted_blocks(self):
