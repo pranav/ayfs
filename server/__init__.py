@@ -92,6 +92,7 @@ class Server():
 
     def heartbeat(self):
         while True:
+            time.sleep(0.2)
             self.register_etcd()
 
     def start_receiver_thread(self):
